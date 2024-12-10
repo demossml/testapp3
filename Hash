@@ -1,0 +1,58 @@
+
+
+export function assert(
+	statement: unknown,
+	message?: string,
+): asserts statement {
+	if (!statement) throw new Error(message);
+}
+
+export const buf2hex = (buffer: ArrayBuffer) =>
+	[...new Uint8Array(buffer)]
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+
+export const isValidSign = async (
+	token: string,
+	payload: Record<string, string>,
+) => {
+	const { hash, ...data } = payload;
+	const encoder = new TextEncoder();
+
+	const k1 = await crypto.subtle.importKey(
+		"raw",
+		encoder.encode("WebAppData"),
+		{ name: "HMAC", hash: { name: "SHA-256" } },
+		false,
+		["sign", "verify"],
+	);
+
+	const secret = await crypto.subtle.sign("HMAC", k1, encoder.encode(token));
+
+	const k2 = await crypto.subtle.importKey(
+		"raw",
+		secret,
+		{ name: "HMAC", hash: { name: "SHA-256" } },
+		false,
+		["sign", "verify"],
+	);
+
+	const digest = await crypto.subtle.sign(
+		"HMAC",
+		k2,
+		encoder.encode(
+			Object.entries(data)
+				.sort()
+				.filter((pair) => pair[1])
+				.map(([k, v]) => `${k}=${v}`)
+				.join("\n"),
+		),
+	);
+
+	const isRecent =
+		(Date.now() - parseInt(data.auth_date) * 1000) / 1000 < 86400; // 86400 секунд в 24 часа
+
+	const hashMatched = buf2hex(digest) === hash;
+
+	return hashMatched && isRecent;
+};
